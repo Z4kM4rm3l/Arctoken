@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every version, rather than cancelling the rest on first failure.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Tests and coverage
+        # fail_under = 90 in pyproject.toml makes this enforce the coverage gate.
+        run: pytest --cov=src --cov-branch
+
+      - name: Types
+        run: mypy --strict src/
+
+      - name: Lint
+        run: ruff check
+
+      - name: Format
+        run: ruff format --check
+
+  mutation:
+    name: Mutation score
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run mutmut
+        # Scoped by paths_to_mutate in pyproject.toml. Exits 0 even when
+        # mutants survive, so the threshold is enforced in the next step.
+        run: mutmut run
+
+      - name: Enforce mutation score >= 80%
+        run: |
+          mutmut export-cicd-stats
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          stats = json.loads(Path("mutants/mutmut-cicd-stats.json").read_text())
+          killed, total = stats["killed"], stats["total"]
+          if total == 0:
+              sys.exit("No mutants were generated, so the gate cannot pass vacuously.")
+
+          score = 100 * killed / total
+          print(f"Mutation score: {score:.1f}% ({killed}/{total} killed)")
+          for outcome in ("survived", "timeout", "suspicious", "no_tests"):
+              print(f"  {outcome}: {stats[outcome]}")
+
+          if score < 80:
+              sys.exit(f"Mutation score {score:.1f}% is below the 80% threshold.")
+          PY
