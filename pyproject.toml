@@ -55,7 +55,8 @@ branch = true
 fail_under = 90
 
 [tool.mutmut]
-paths_to_mutate = "src/detectors"
+paths_to_mutate = ["src/arctoken/detectors"]
+also_copy = ["src"]
 
 [tool.mypy]
 strict = true
@@ -64,6 +65,7 @@ files = ["src"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["tests/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
