@@ -9,3 +9,5 @@ htmlcov/
 *.egg-info/
 build/
 dist/
+mutants/
+.mutmut-cache

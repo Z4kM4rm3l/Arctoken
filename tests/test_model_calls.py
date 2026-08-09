@@ -1,0 +1,43 @@
+from pathlib import Path
+
+import pytest
+
+from arctoken.detectors.model_calls import find_model_calls
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_finds_every_dirty_call_site():
+    result = find_model_calls(FIXTURES / "dirty" / "model_calls.py")
+    assert result == [
+        (9, ".chat.completions.create"),
+        (16, ".messages.create"),
+        (23, ".chat.completions.create"),
+        (27, "model=+messages="),
+        (31, ".messages.create"),
+    ]
+
+
+def test_clean_fixture_has_no_matches():
+    result = find_model_calls(FIXTURES / "clean" / "model_calls.py")
+    assert result == []
+
+
+def test_raises_syntax_error_on_unparseable_file(tmp_path):
+    bad_file = tmp_path / "not_python.py"
+    bad_file.write_text("def broken(:\n    pass\n")
+    with pytest.raises(SyntaxError):
+        find_model_calls(bad_file)
+
+
+def test_preserves_encounter_order_for_calls_on_the_same_line():
+    # Sorting by the whole (line, pattern) tuple would alphabetize these two
+    # ties ("." < "c" < "m" means chat.completions sorts before messages),
+    # reordering them ahead of the messages.create call that is actually
+    # written first. Sorting by line number alone is a stable sort, so ties
+    # must keep their left-to-right encounter order instead.
+    result = find_model_calls(FIXTURES / "dirty" / "same_line_calls.py")
+    assert result == [
+        (7, ".messages.create"),
+        (7, ".chat.completions.create"),
+    ]
