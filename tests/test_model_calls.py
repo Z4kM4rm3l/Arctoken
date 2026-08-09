@@ -26,8 +26,11 @@ def test_clean_fixture_has_no_matches():
 def test_raises_syntax_error_on_unparseable_file(tmp_path):
     bad_file = tmp_path / "not_python.py"
     bad_file.write_text("def broken(:\n    pass\n")
-    with pytest.raises(SyntaxError):
+    with pytest.raises(SyntaxError) as exc_info:
         find_model_calls(bad_file)
+    # The filename rides along on the raised error, so anything upstream can
+    # report which file failed to parse.
+    assert exc_info.value.filename == str(bad_file)
 
 
 def test_preserves_encounter_order_for_calls_on_the_same_line():
