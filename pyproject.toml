@@ -55,7 +55,7 @@ branch = true
 fail_under = 90
 
 [tool.mutmut]
-paths_to_mutate = ["src/arctoken/detectors"]
+paths_to_mutate = ["src/arctoken/detectors", "src/arctoken/walker.py"]
 also_copy = ["src"]
 
 [tool.mypy]

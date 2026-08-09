@@ -10,7 +10,7 @@ _CHAIN_SUFFIXES: tuple[tuple[str, ...], ...] = (
 
 
 def find_model_calls(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     matches: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
