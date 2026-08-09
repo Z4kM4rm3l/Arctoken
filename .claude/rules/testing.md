@@ -18,6 +18,10 @@ file, line, and mutation; a count alone is not useful to me.
 Mutation testing is scoped to `src/arctoken/detectors/` and `src/arctoken/walker.py`
 deliberately. Do not widen it further.
 
+Mutation testing does not run natively on Windows; mutmut requires WSL or Linux.
+On Windows, report NOT RUN for that gate rather than omitting it or estimating a
+score. The other five gates run everywhere.
+
 ## Not allowed
 
 - Editing, deleting, or `xfail`-ing a test to make a gate pass. If you believe
