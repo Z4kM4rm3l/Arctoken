@@ -1,6 +1,7 @@
 """Finds direct LLM API call sites in a Python source file."""
 
 import ast
+from dataclasses import dataclass
 from pathlib import Path
 
 _CHAIN_SUFFIXES: tuple[tuple[str, ...], ...] = (
@@ -9,17 +10,30 @@ _CHAIN_SUFFIXES: tuple[tuple[str, ...], ...] = (
 )
 
 
-def find_model_calls(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    matches: list[tuple[int, str]] = []
+@dataclass(frozen=True)
+class CallSite:
+    """A matched call, keeping the node so other analyses need not re-parse."""
+
+    line: int
+    pattern: str
+    node: ast.Call
+
+
+def find_model_call_nodes(tree: ast.Module) -> list[CallSite]:
+    sites: list[CallSite] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         pattern = _match_chain(node.func) or _match_keywords(node.keywords)
         if pattern is not None:
-            matches.append((node.lineno, pattern))
-    matches.sort(key=lambda match: match[0])
-    return matches
+            sites.append(CallSite(node.lineno, pattern, node))
+    sites.sort(key=lambda site: site.line)
+    return sites
+
+
+def find_model_calls(path: Path) -> list[tuple[int, str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [(site.line, site.pattern) for site in find_model_call_nodes(tree)]
 
 
 def _match_chain(func: ast.expr) -> str | None:
