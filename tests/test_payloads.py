@@ -140,6 +140,38 @@ CLIENT.chat.completions.create(
 )
 """
 
+LITERAL_CONCATENATION = """
+client.messages.create(
+    model="claude-3",
+    system="You are " + "helpful.",
+    messages=[],
+)
+"""
+
+CONSTANT_AFTER_NON_LITERALS = """
+import os
+
+CLIENT = make_client()
+
+SYSTEM_PROMPT = "You are terse."
+
+client.messages.create(
+    model="claude-3",
+    system=SYSTEM_PROMPT,
+    messages=[],
+)
+"""
+
+DOTTED_IMPORT = """
+import config.prompts
+
+client.messages.create(
+    model="claude-3",
+    system=config,
+    messages=[],
+)
+"""
+
 
 def test_literal_system_prompt_resolves():
     assert payloads(LITERAL_SYSTEM) == [
@@ -344,6 +376,52 @@ def test_system_message_is_found_when_it_is_not_the_first_message():
                     {"role": "system", "content": "You are terse."},
                 ]
             ),
+            max_tokens=None,
+        )
+    ]
+
+
+def test_concatenation_of_two_literals_joins_into_one_string():
+    # Two static pieces and no holes, so the pieces must be joined with nothing
+    # between them. A single-piece sequence would never exercise the separator.
+    assert payloads(LITERAL_CONCATENATION) == [
+        Payload(
+            line=2,
+            model=Resolved("claude-3"),
+            system=Resolved("You are helpful."),
+            tools=None,
+            messages=Resolved([]),
+            max_tokens=None,
+        )
+    ]
+
+
+def test_constant_is_collected_after_imports_and_non_literal_assignments():
+    # Constant collection must keep scanning past statements it cannot use.
+    # Real files open with imports and client construction, so stopping at the
+    # first one would report every constant below it as unreadable.
+    assert payloads(CONSTANT_AFTER_NON_LITERALS) == [
+        Payload(
+            line=8,
+            model=Resolved("claude-3"),
+            system=Resolved("You are terse."),
+            tools=None,
+            messages=Resolved([]),
+            max_tokens=None,
+        )
+    ]
+
+
+def test_dotted_import_binds_only_its_root_name():
+    # "import config.prompts" binds "config", not "config.prompts", so a
+    # reference to config is an imported name rather than a runtime one.
+    assert payloads(DOTTED_IMPORT) == [
+        Payload(
+            line=4,
+            model=Resolved("claude-3"),
+            system=Unresolved("imported-name"),
+            tools=None,
+            messages=Resolved([]),
             max_tokens=None,
         )
     ]
