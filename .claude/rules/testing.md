@@ -8,7 +8,7 @@ Write NOT RUN for any gate you did not run in this session.
 | Tests | 0 failed, 0 skipped | `pytest` |
 | Line coverage | >= 90% on `src/` | `pytest --cov=src` |
 | Branch coverage | >= 85% | `pytest --cov=src --cov-branch` |
-| Mutation score | >= 80% on `src/arctoken/detectors/`, `src/arctoken/walker.py`, and `src/arctoken/payloads.py` | `mutmut run` |
+| Mutation score | >= 80% on `src/arctoken/detectors/`, `src/arctoken/walker.py`, `src/arctoken/payloads.py`, and `src/arctoken/project.py` | `mutmut run` |
 | Types | clean | `mypy --strict src/` |
 | Lint | clean | `ruff check && ruff format --check` |
 
@@ -16,7 +16,8 @@ A skipped test counts as a failure. List surviving mutants individually with
 file, line, and mutation; a count alone is not useful to me.
 
 Mutation testing is scoped to `src/arctoken/detectors/`, `src/arctoken/walker.py`,
-and `src/arctoken/payloads.py` deliberately. Do not widen it further.
+`src/arctoken/payloads.py`, and `src/arctoken/project.py` deliberately. Do not
+widen it further.
 
 Mutation testing does not run natively on Windows; mutmut requires WSL or Linux.
 On Windows, report NOT RUN for that gate rather than omitting it or estimating a

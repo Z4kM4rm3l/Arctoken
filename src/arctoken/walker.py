@@ -56,7 +56,7 @@ def scan_directory(root: Path, excludes: Iterable[str] | None = None) -> ScanRes
     patterns = DEFAULT_EXCLUDES if excludes is None else frozenset(excludes)
     matches: list[ModelCall] = []
     skipped: list[SkippedFile] = []
-    for path in _walk_python_files(root, patterns):
+    for path in walk_python_files(root, patterns):
         try:
             found = find_model_calls(path)
         except SyntaxError:
@@ -70,7 +70,7 @@ def scan_directory(root: Path, excludes: Iterable[str] | None = None) -> ScanRes
     return ScanResult(matches=matches, skipped=skipped)
 
 
-def _walk_python_files(root: Path, excludes: frozenset[str]) -> Iterator[Path]:
+def walk_python_files(root: Path, excludes: frozenset[str]) -> Iterator[Path]:
     # Prune excluded directories in place so os.walk never descends into them;
     # a vendored .venv can hold far more files than the project itself.
     for dirpath, dirnames, filenames in os.walk(root):
