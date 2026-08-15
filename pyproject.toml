@@ -60,6 +60,7 @@ source_paths = [
     "src/arctoken/walker.py",
     "src/arctoken/payloads.py",
     "src/arctoken/project.py",
+    "src/arctoken/callgraph.py",
 ]
 also_copy = ["src"]
 
