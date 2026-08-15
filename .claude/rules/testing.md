@@ -23,6 +23,13 @@ Mutation testing does not run natively on Windows; mutmut requires WSL or Linux.
 On Windows, report NOT RUN for that gate rather than omitting it or estimating a
 score. The other five gates run everywhere.
 
+## Fixtures must exercise the operation, not merely satisfy it
+
+Anything split, joined, indexed, or sliced needs a fixture with at least two
+segments on either side of the delimiter. Any loop that skips elements needs an
+interesting element after a skipped one, or `continue` and `break` are
+indistinguishable.
+
 ## Not allowed
 
 - Editing, deleting, or `xfail`-ing a test to make a gate pass. If you believe

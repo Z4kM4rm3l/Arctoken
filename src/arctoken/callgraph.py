@@ -88,9 +88,31 @@ class DirectCall:
 
 
 @dataclass(frozen=True)
+class Reaching:
+    """A function that *definitely* reaches a model call, and how.
+
+    Membership is certainty, not suspicion. An unresolved callee cannot be
+    followed, so a function whose only route to the API runs through one is
+    absent from this set entirely -- including when that call sits inside a
+    loop, which is a real cost risk carrying no entry here. Reading this set
+    as "everything that might reach a model call" turns the exclusion into a
+    silent false negative; unresolved edges have to be reported alongside it.
+
+    ``depth`` is the number of hops to the nearest function containing a
+    direct call, so a direct caller is 0. ``path`` starts at ``func`` and ends
+    at that function.
+    """
+
+    func: Func
+    depth: int
+    path: tuple[Func, ...]
+
+
+@dataclass(frozen=True)
 class CallGraph:
     edges: tuple[Edge, ...]
     direct_calls: tuple[DirectCall, ...]
+    reaching: tuple[Reaching, ...]
 
 
 def build_call_graph(project: Project) -> CallGraph:
@@ -104,7 +126,60 @@ def build_call_graph(project: Project) -> CallGraph:
         direct_calls.extend(walker.direct_calls)
     edges.sort(key=lambda edge: (edge.caller.module, edge.caller.qualname, edge.line))
     direct_calls.sort(key=lambda call: (call.func.module, call.func.qualname, call.line))
-    return CallGraph(edges=tuple(edges), direct_calls=tuple(direct_calls))
+    return CallGraph(
+        edges=tuple(edges),
+        direct_calls=tuple(direct_calls),
+        reaching=_propagate(edges, direct_calls),
+    )
+
+
+def _propagate(edges: list[Edge], direct_calls: list[DirectCall]) -> tuple[Reaching, ...]:
+    """Breadth-first search backwards from every function holding a direct call.
+
+    Termination does not rest on a depth cap. The marking is monotone and the
+    lattice is finite, so visiting each function once is enough; a cycle or a
+    self-recursive function simply finds itself already visited. Breadth-first
+    order also yields the minimum depth for free.
+    """
+    callers = _callers_by_callee(edges)
+    found: dict[Func, Reaching] = {}
+    frontier = sorted(
+        {call.func for call in direct_calls}, key=lambda func: (func.module, func.qualname)
+    )
+    for func in frontier:
+        found[func] = Reaching(func=func, depth=0, path=(func,))
+
+    while frontier:
+        # Sorting each layer makes the tie between two equal-length paths fall
+        # to the lower qualified name rather than to edge discovery order.
+        nxt: list[Func] = []
+        for callee in frontier:
+            reached = found[callee]
+            for caller in callers.get(callee, ()):
+                if caller in found:
+                    continue
+                found[caller] = Reaching(
+                    func=caller,
+                    depth=reached.depth + 1,
+                    path=(caller, *reached.path),
+                )
+                nxt.append(caller)
+        frontier = sorted(nxt, key=lambda func: (func.module, func.qualname))
+
+    return tuple(
+        found[func] for func in sorted(found, key=lambda func: (func.module, func.qualname))
+    )
+
+
+def _callers_by_callee(edges: list[Edge]) -> dict[Func, list[Func]]:
+    """Reverse the edge list. Unresolved callees have nothing to point back to."""
+    callers: dict[Func, list[Func]] = {}
+    for edge in edges:
+        if isinstance(edge.callee, Func):
+            callers.setdefault(edge.callee, []).append(edge.caller)
+    for group in callers.values():
+        group.sort(key=lambda func: (func.module, func.qualname))
+    return callers
 
 
 @dataclass(frozen=True)
