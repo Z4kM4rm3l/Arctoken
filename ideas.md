@@ -33,6 +33,19 @@ A first pass could treat a bare `Name` argument that resolves to a project
 function as a weaker kind of edge, kept apart from called edges so the
 distinction stays visible.
 
+## The report must surface unresolved edges with their loop context
+
+`reaching` is the set of functions that *definitely* reach a model call.
+Unresolved callees cannot be followed, so a function whose only route to the
+API runs through one is absent from it — including when that call sits inside
+a loop, which is precisely the shape worth worrying about.
+
+That exclusion is correct in the graph and becomes a silent false negative the
+moment the report treats `reaching` as the whole story. Unresolved edges have
+to be reported next to it, carrying their loop context, so an unreadable call
+repeated per item reads as "could not tell, and it is in a loop" rather than
+as silence.
+
 ## A bulk outside-tree count should hint at scanning from a parent
 
 Running the tool on a subpackage makes every relative import that climbs above

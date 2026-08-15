@@ -5,6 +5,7 @@ from arctoken.callgraph import (
     Edge,
     Func,
     LoopContext,
+    Reaching,
     UnresolvedCall,
     build_call_graph,
 )
@@ -140,6 +141,71 @@ def aaa():
 
 def helper():
     pass
+"""
+
+CYCLE = """
+def a():
+    b()
+
+
+def b():
+    client.messages.create(model="m", messages=[])
+    a()
+"""
+
+SELF_RECURSION = """
+def f(n):
+    client.messages.create(model="m", messages=[])
+    f(n - 1)
+"""
+
+NOT_REACHING = """
+def reaches():
+    client.messages.create(model="m", messages=[])
+
+
+def calls_unresolved(client):
+    return client.send()
+
+
+def calls_a_dead_end():
+    return helper()
+
+
+def helper():
+    pass
+"""
+
+SKIPPED_CALLER = """
+def aaa():
+    client.messages.create(model="m", messages=[])
+    leaf()
+
+
+def zzz():
+    leaf()
+
+
+def leaf():
+    client.messages.create(model="m", messages=[])
+"""
+
+EQUAL_PATHS = """
+def top():
+    zzz()
+    aaa()
+
+
+def aaa():
+    leaf()
+
+
+def zzz():
+    leaf()
+
+
+def leaf():
+    client.messages.create(model="m", messages=[])
 """
 
 TWO_PATHS = """
@@ -671,3 +737,100 @@ def test_edge_carries_the_loop_context_of_the_call_not_the_callee(tmp_path):
     ask_call = next(call for call in graph.direct_calls)
     assert ask_call.func == Func("llm_client", "ask")
     assert ask_call.loop == NO_LOOP
+
+
+# --- transitive propagation ------------------------------------------------
+
+
+def test_reaching_records_depth_and_path_across_files(tmp_path):
+    # A three-link chain, so the path has an element with entries on both
+    # sides of it rather than only ends.
+    graph = graph_of(tmp_path, llm_client=LLM_CLIENT, agent=AGENT)
+
+    assert list(graph.reaching) == [
+        Reaching(
+            func=Func("agent", "run"),
+            depth=2,
+            path=(Func("agent", "run"), Func("agent", "step"), Func("llm_client", "ask")),
+        ),
+        Reaching(
+            func=Func("agent", "step"),
+            depth=1,
+            path=(Func("agent", "step"), Func("llm_client", "ask")),
+        ),
+        Reaching(
+            func=Func("llm_client", "ask"),
+            depth=0,
+            path=(Func("llm_client", "ask"),),
+        ),
+    ]
+
+
+def test_mutual_recursion_terminates(tmp_path):
+    graph = graph_of(tmp_path, ring=CYCLE)
+
+    assert list(graph.reaching) == [
+        Reaching(func=Func("ring", "a"), depth=1, path=(Func("ring", "a"), Func("ring", "b"))),
+        Reaching(func=Func("ring", "b"), depth=0, path=(Func("ring", "b"),)),
+    ]
+
+
+def test_direct_recursion_terminates(tmp_path):
+    graph = graph_of(tmp_path, loopy=SELF_RECURSION)
+
+    assert list(graph.reaching) == [
+        Reaching(func=Func("loopy", "f"), depth=0, path=(Func("loopy", "f"),))
+    ]
+
+
+def test_shortest_path_wins_when_two_paths_exist(tmp_path):
+    # top reaches leaf directly and also through middle; the direct hop is
+    # the honest depth.
+    graph = graph_of(tmp_path, solo=TWO_PATHS)
+
+    assert [(reaching.func, reaching.depth) for reaching in graph.reaching] == [
+        (Func("solo", "leaf"), 0),
+        (Func("solo", "middle"), 1),
+        (Func("solo", "top"), 1),
+    ]
+    top = next(item for item in graph.reaching if item.func == Func("solo", "top"))
+    assert top.path == (Func("solo", "top"), Func("solo", "leaf"))
+
+
+def test_equal_length_paths_break_the_tie_on_qualified_name(tmp_path):
+    # top reaches leaf through both aaa and zzz at the same depth, so without
+    # a tie-break the recorded path would follow edge discovery order.
+    graph = graph_of(tmp_path, solo=EQUAL_PATHS)
+
+    assert [(reaching.func, reaching.depth) for reaching in graph.reaching] == [
+        (Func("solo", "aaa"), 1),
+        (Func("solo", "leaf"), 0),
+        (Func("solo", "top"), 2),
+        (Func("solo", "zzz"), 1),
+    ]
+    top = next(item for item in graph.reaching if item.func == Func("solo", "top"))
+    assert top.path == (Func("solo", "top"), Func("solo", "aaa"), Func("solo", "leaf"))
+
+
+def test_functions_that_reach_nothing_are_absent(tmp_path):
+    # An unresolved callee cannot be followed, so calls_unresolved must not be
+    # reported as reaching; saying otherwise would be a guess. calls_a_dead_end
+    # resolves fine but its callee reaches nothing.
+    graph = graph_of(tmp_path, app=NOT_REACHING)
+
+    assert list(graph.reaching) == [
+        Reaching(func=Func("app", "reaches"), depth=0, path=(Func("app", "reaches"),))
+    ]
+
+
+def test_an_already_reached_caller_does_not_hide_the_callers_after_it(tmp_path):
+    # leaf's callers are [aaa, zzz]. aaa is already a seed, so a loop that
+    # stopped at the first visited caller would never record zzz at all --
+    # under-reporting silently rather than failing visibly.
+    graph = graph_of(tmp_path, app=SKIPPED_CALLER)
+
+    assert list(graph.reaching) == [
+        Reaching(func=Func("app", "aaa"), depth=0, path=(Func("app", "aaa"),)),
+        Reaching(func=Func("app", "leaf"), depth=0, path=(Func("app", "leaf"),)),
+        Reaching(func=Func("app", "zzz"), depth=1, path=(Func("app", "zzz"), Func("app", "leaf"))),
+    ]
