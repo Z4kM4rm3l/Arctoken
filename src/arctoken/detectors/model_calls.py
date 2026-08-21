@@ -32,7 +32,10 @@ def find_model_call_nodes(tree: ast.Module) -> list[CallSite]:
 
 
 def find_model_calls(path: Path) -> list[tuple[int, str]]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    # utf-8-sig, not utf-8: a leading BOM is legal in a Python file and CPython
+    # strips it, so plain utf-8 keeps a U+FEFF that ast.parse then rejects.
+    # Identical to utf-8 on files without a BOM.
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     return [(site.line, site.pattern) for site in find_model_call_nodes(tree)]
 
 

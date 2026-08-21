@@ -44,3 +44,13 @@ def test_preserves_encounter_order_for_calls_on_the_same_line():
         (7, ".messages.create"),
         (7, ".chat.completions.create"),
     ]
+
+
+def test_file_with_a_utf8_bom_is_parsed(tmp_path):
+    # CPython strips a leading BOM, so this file runs fine under python.
+    # Decoding it as plain utf-8 keeps the U+FEFF and ast.parse rejects it,
+    # which silently drops a real model call from the scan.
+    bom_file = tmp_path / "with_bom.py"
+    bom_file.write_bytes(b"\xef\xbb\xbf" + b'client.messages.create(model="m", messages=[])\n')
+
+    assert find_model_calls(bom_file) == [(1, ".messages.create")]

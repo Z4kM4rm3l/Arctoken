@@ -32,7 +32,9 @@ def load_project(root: Path, excludes: Iterable[str] | None = None) -> Project:
     skipped: list[SkippedFile] = []
     for path in walk_python_files(root, patterns):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            # utf-8-sig, not utf-8: a leading BOM is legal and CPython strips
+            # it, so plain utf-8 keeps a U+FEFF that ast.parse rejects.
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         except SyntaxError:
             skipped.append(SkippedFile(path, "unparseable"))
         except UnicodeDecodeError:

@@ -109,3 +109,18 @@ def test_skipped_files_are_ordered_by_path_not_by_walk_order(tmp_path):
         tmp_path / "aaa" / "broken.py",
         tmp_path / "z_broken.py",
     ]
+
+
+def test_module_with_a_utf8_bom_is_parsed_not_skipped(tmp_path):
+    # A BOM is legal at the start of a Python file. Skipping it as unparseable
+    # loses the module entirely, along with any model call inside it.
+    (tmp_path / "with_bom.py").write_bytes(b"\xef\xbb\xbf" + b"def handler():\n    pass\n")
+
+    project = load_project(tmp_path)
+
+    (module,) = project.modules
+    assert module.name == "with_bom"
+    assert [node.name for node in module.tree.body if isinstance(node, ast.FunctionDef)] == [
+        "handler"
+    ]
+    assert list(project.skipped) == []
