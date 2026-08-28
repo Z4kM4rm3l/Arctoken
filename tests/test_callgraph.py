@@ -982,3 +982,76 @@ def test_excluded_iterable_keeps_the_depth_of_an_enclosing_loop_of_another_kind(
     assert loops["expand"] == LoopContext(depth=1, kinds=("for",))
     assert loops["use"] == LoopContext(depth=2, kinds=("for", "comprehension"))
     assert loops["emit"] == LoopContext(depth=1, kinds=("for",))
+
+
+def test_from_imported_submodule_method_resolves_across_files(tmp_path):
+    # from pkg import agent; agent.validate() -- the receiver is a submodule
+    # bound by a from-import, so the call resolves to that module's function
+    # and the caller is pulled into reaching through it.
+    graph = package_graph(
+        tmp_path,
+        {
+            "pkg/__init__.py": "",
+            "pkg/agent.py": (
+                "def validate(order):\n    client.messages.create(model='m', messages=[])\n"
+            ),
+            "app.py": (
+                "from pkg import agent\n\n\ndef run(order):\n    return agent.validate(order)\n"
+            ),
+        },
+    )
+
+    assert Edge(
+        caller=Func("app", "run"),
+        callee=Func("pkg.agent", "validate"),
+        line=5,
+        loop=NO_LOOP,
+    ) in list(graph.edges)
+    reaching = {r.func: r.depth for r in graph.reaching}
+    assert reaching[Func("app", "run")] == 1
+    assert reaching[Func("pkg.agent", "validate")] == 0
+
+
+def test_from_imported_name_that_is_not_a_module_stays_unknown_receiver(tmp_path):
+    # from pkg import helper, where helper is a function in pkg/__init__, not a
+    # submodule. helper.configure() is an attribute on an object we cannot see,
+    # so it must stay unresolved -- the base.original-in-modules guard. Without
+    # it, an object attribute would resolve to a phantom function.
+    graph = package_graph(
+        tmp_path,
+        {
+            "pkg/__init__.py": "def helper():\n    pass\n",
+            "app.py": "from pkg import helper\n\n\ndef run():\n    return helper.configure()\n",
+        },
+    )
+
+    assert list(graph.edges) == [
+        Edge(
+            caller=Func("app", "run"),
+            callee=UnresolvedCall("unknown-receiver"),
+            line=5,
+            loop=NO_LOOP,
+        )
+    ]
+
+
+def test_from_imported_submodule_resolves_through_a_multi_segment_package(tmp_path):
+    # from a.b import c; c.go() -- the base a.b has two segments, so joining
+    # base to the imported name (a.b.c) is actually exercised, not a single
+    # segment that would pass even if the join were wrong.
+    graph = package_graph(
+        tmp_path,
+        {
+            "a/__init__.py": "",
+            "a/b/__init__.py": "",
+            "a/b/c.py": "def go():\n    client.messages.create(model='m', messages=[])\n",
+            "app.py": "from a.b import c\n\n\ndef run():\n    return c.go()\n",
+        },
+    )
+
+    assert Edge(
+        caller=Func("app", "run"),
+        callee=Func("a.b.c", "go"),
+        line=5,
+        loop=NO_LOOP,
+    ) in list(graph.edges)

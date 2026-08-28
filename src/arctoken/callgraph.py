@@ -335,6 +335,14 @@ class _ModuleWalker:
             return UnresolvedCall("unknown-method")
         if receiver in self.imported_modules:
             return self._from_module(self.imported_modules[receiver], attr)
+        if receiver in self.imported_names:
+            base, original = self.imported_names[receiver]
+            qualified = f"{base}.{original}" if base else original
+            # Only when the binding names a scanned submodule; a from-imported
+            # object (a function or class from an __init__) whose path is not a
+            # module keeps unknown-receiver rather than resolving to a phantom.
+            if qualified in self.index.modules:
+                return Func(qualified, attr)
         return UnresolvedCall("unknown-receiver")
 
     def _from_module(self, module_name: str, attr: str) -> Func | UnresolvedCall:

@@ -57,3 +57,21 @@ The report layer should notice the concentration and say so directly: scanning
 from the parent directory would resolve them. Left as a wall of unresolved
 edges, the honest answer reads as the tool failing, which is the wrong first
 impression to give and the one most users will form.
+
+## Payloads cross-module attribute resolution (deferred)
+
+Cross-module resolution landed in the call graph — a `from pkg import mod`
+then `mod.func()` now resolves to `Func("pkg.mod", "func")`. The payload layer
+did not get the same treatment: `crm_lookup.SCHEMA` still reads as a hole,
+because `extract_payloads` operates on one module's tree and has no
+project-wide view of other modules' constants.
+
+Intermediate state on refund-agent after the method-resolution cycle: the call
+graph shows all three agents wired together, but tool schemas are still 1,274
+of 3,333 chars. The remaining 2,059 (`crm_lookup.SCHEMA` 605 +
+`refund_decision.SCHEMA` 1,454) stay holes until payloads can resolve a
+`module.CONSTANT` attribute against the source module's literals.
+
+Closing it needs a project-wide constant map threaded into `extract_payloads`.
+That interface should not be designed before a consumer exists to own the map —
+`report.py` or `estimate.py`. Sequence this cycle once one of them is present.
