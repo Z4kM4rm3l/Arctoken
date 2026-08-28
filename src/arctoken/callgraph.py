@@ -51,6 +51,24 @@ _LOOP_KINDS: dict[type[ast.AST], str] = {
     ast.GeneratorExp: "comprehension",
 }
 
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _once_evaluated_iterable(node: ast.AST) -> ast.expr | None:
+    """The subtree of a loop that runs once, before iteration begins.
+
+    A for-loop's iterable and a comprehension's *first* generator iterable are
+    evaluated a single time, so a call there does not fan out. Everything after
+    the first comprehension generator -- later generators, filters, the element
+    expression -- runs per item and is not excluded. A while-loop excludes
+    nothing: its test re-runs every iteration.
+    """
+    if isinstance(node, ast.For | ast.AsyncFor):
+        return node.iter
+    if isinstance(node, _COMPREHENSIONS):
+        return node.generators[0].iter
+    return None
+
 
 @dataclass(frozen=True)
 class Func:
@@ -223,6 +241,7 @@ class _ModuleWalker:
         self.scope: list[str] = []
         self.classes: list[str] = []
         self.loops: list[str] = []
+        self._once_evaluated: ast.expr | None = None
         self.edges: list[Edge] = []
         self.direct_calls: list[DirectCall] = []
 
@@ -230,6 +249,18 @@ class _ModuleWalker:
         self._walk(self.module.tree)
 
     def _walk(self, node: ast.AST) -> None:
+        if node is self._once_evaluated:
+            # A loop's iterable runs once, before iteration, so it sits at the
+            # enclosing depth rather than the loop's. Drop the innermost frame
+            # for this subtree only. _visit, not _walk, so the re-entry does not
+            # match this same node again.
+            frame = self.loops.pop()
+            self._visit(node)
+            self.loops.append(frame)
+            return
+        self._visit(node)
+
+    def _visit(self, node: ast.AST) -> None:
         if isinstance(node, ast.Call):
             self._record_call(node)
         with self._context(node):
@@ -256,9 +287,12 @@ class _ModuleWalker:
             if kind is None:
                 yield
             else:
+                outer_once = self._once_evaluated
+                self._once_evaluated = _once_evaluated_iterable(node)
                 self.loops.append(kind)
                 yield
                 self.loops.pop()
+                self._once_evaluated = outer_once
 
     def _record_call(self, node: ast.Call) -> None:
         target = self._resolve(node.func)
