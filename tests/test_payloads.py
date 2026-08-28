@@ -445,3 +445,41 @@ def test_openai_system_message_inside_messages_is_marked_derived():
             max_tokens=None,
         )
     ]
+
+
+MIXED_TOOLS_LIST = """
+SEARCH_TOOL = {"name": "search", "description": "web search"}
+
+client.messages.create(
+    model="claude-3",
+    tools=[SEARCH_TOOL, {"name": "inline"}, build_tool(), MYSTERY_TOOL],
+    messages=[],
+)
+"""
+
+
+def test_list_element_that_names_a_module_constant_resolves_to_its_literal():
+    # Four elements exercise every branch of element resolution in one list:
+    # a Name bound to a module-level literal resolves to that literal; an
+    # inline dict literal is kept; a function call is a hole; and a Name with
+    # no module-level literal is also a hole -- a name we cannot see must not
+    # be invented, the same refusal the top-level Name case already makes.
+    result = payloads(MIXED_TOOLS_LIST)
+
+    assert result == [
+        Payload(
+            line=4,
+            model=Resolved("claude-3"),
+            system=None,
+            tools=Partial(
+                (
+                    {"name": "search", "description": "web search"},
+                    {"name": "inline"},
+                    None,
+                    None,
+                )
+            ),
+            messages=Resolved([]),
+            max_tokens=None,
+        )
+    ]
