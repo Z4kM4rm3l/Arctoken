@@ -113,7 +113,7 @@ def _resolve(node: ast.expr, constants: dict[str, Part], imported: set[str]) -> 
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _from_concat(node)
     if isinstance(node, ast.List):
-        return _from_list(node)
+        return _from_list(node, constants)
     if isinstance(node, ast.Name):
         if node.id in constants:
             return Resolved(constants[node.id])
@@ -142,14 +142,25 @@ def _flatten_concat(node: ast.expr, parts: list[Part]) -> None:
     parts.append(_static_text(node))
 
 
-def _from_list(node: ast.List) -> Field:
+def _from_list(node: ast.List, constants: dict[str, Part]) -> Field:
     # Reached only when the list as a whole failed to read, so at least one
-    # element is a hole and the readable schemas are worth keeping.
+    # element is a hole and the readable schemas are worth keeping. An element
+    # naming a module-level constant resolves to that literal, the same way a
+    # bare Name kwarg does; a name we cannot see stays a hole rather than a
+    # guess.
     parts: list[Part] = []
     for element in node.elts:
-        literal = _literal(element)
-        parts.append(None if isinstance(literal, _Unreadable) else literal)
+        parts.append(_element(element, constants))
     return Partial(tuple(parts))
+
+
+def _element(node: ast.expr, constants: dict[str, Part]) -> Part:
+    literal = _literal(node)
+    if not isinstance(literal, _Unreadable):
+        return literal
+    if isinstance(node, ast.Name) and node.id in constants:
+        return constants[node.id]
+    return None
 
 
 def _sequence(parts: list[Part]) -> Field:
