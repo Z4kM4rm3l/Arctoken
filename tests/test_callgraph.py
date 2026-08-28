@@ -834,3 +834,151 @@ def test_an_already_reached_caller_does_not_hide_the_callers_after_it(tmp_path):
         Reaching(func=Func("app", "leaf"), depth=0, path=(Func("app", "leaf"),)),
         Reaching(func=Func("app", "zzz"), depth=1, path=(Func("app", "zzz"), Func("app", "leaf"))),
     ]
+
+
+STREAM_RELAY = """
+def relay():
+    for chunk in stream_reply():
+        emit(chunk)
+
+
+def emit(chunk):
+    pass
+
+
+def stream_reply():
+    client.messages.create(model="m", messages=[])
+"""
+
+NESTED_ITER = """
+def run(rows):
+    for row in rows:
+        for item in fetch(row):
+            handle(item)
+
+
+def fetch(row):
+    pass
+
+
+def handle(item):
+    pass
+"""
+
+WHILE_TEST = """
+def run(state):
+    while needs_retry(state):
+        attempt(state)
+
+
+def needs_retry(state):
+    pass
+
+
+def attempt(state):
+    pass
+"""
+
+COMPREHENSION_GENERATORS = """
+def run():
+    return [make(y) for x in source() for y in expand(x) if keep(y)]
+
+
+def source():
+    pass
+
+
+def expand(x):
+    pass
+
+
+def keep(y):
+    pass
+
+
+def make(y):
+    pass
+"""
+
+
+def _loop_by_callee(graph) -> dict[str, LoopContext]:
+    return {edge.callee.qualname: edge.loop for edge in graph.edges}
+
+
+def test_for_iterable_runs_once_before_iteration_so_carries_no_loop_depth(tmp_path):
+    # for chunk in stream_reply(): the call is the iterable, evaluated once.
+    # Counting it as depth 1 is a false fan-out claim, and streaming code is
+    # built entirely on this shape.
+    graph = graph_of(tmp_path, app=STREAM_RELAY)
+    loops = _loop_by_callee(graph)
+
+    assert loops["stream_reply"] == NO_LOOP
+    # The loop body still counts.
+    assert loops["emit"] == LoopContext(depth=1, kinds=("for",))
+
+
+def test_inner_iterable_keeps_the_enclosing_loop_depth_only(tmp_path):
+    # for row in rows: for item in fetch(row): fetch runs once per outer row,
+    # so depth 1 -- the enclosing loop -- not 0 and not 2.
+    graph = graph_of(tmp_path, app=NESTED_ITER)
+    loops = _loop_by_callee(graph)
+
+    assert loops["fetch"] == LoopContext(depth=1, kinds=("for",))
+    assert loops["handle"] == LoopContext(depth=2, kinds=("for", "for"))
+
+
+def test_while_test_is_re_evaluated_each_iteration_so_keeps_its_depth(tmp_path):
+    # A while test is not a for iterable: needs_retry(state) is checked before
+    # every iteration, so it genuinely carries the loop's depth.
+    graph = graph_of(tmp_path, app=WHILE_TEST)
+    loops = _loop_by_callee(graph)
+
+    assert loops["needs_retry"] == LoopContext(depth=1, kinds=("while",))
+    assert loops["attempt"] == LoopContext(depth=1, kinds=("while",))
+
+
+def test_comprehension_excludes_only_the_outermost_iterable(tmp_path):
+    # [make(y) for x in source() for y in expand(x) if keep(y)]
+    # source() is the first generator's iterable -> runs once -> depth 0.
+    # Everything after it runs per element of source: the second iterable
+    # expand(x), the filter keep(y), and the element make(y).
+    graph = graph_of(tmp_path, app=COMPREHENSION_GENERATORS)
+    loops = _loop_by_callee(graph)
+
+    assert loops["source"] == NO_LOOP
+    assert loops["expand"] == LoopContext(depth=1, kinds=("comprehension",))
+    assert loops["keep"] == LoopContext(depth=1, kinds=("comprehension",))
+    assert loops["make"] == LoopContext(depth=1, kinds=("comprehension",))
+
+
+COMPREHENSION_IN_FOR = """
+def run(rows):
+    for row in rows:
+        results = [use(y) for y in expand(row)]
+        emit(results)
+
+
+def expand(row):
+    pass
+
+
+def use(y):
+    pass
+
+
+def emit(results):
+    pass
+"""
+
+
+def test_excluded_iterable_keeps_the_depth_of_an_enclosing_loop_of_another_kind(tmp_path):
+    # A comprehension's outermost iterable is excluded from its own frame, but
+    # here it sits inside a for loop, so it keeps that for's depth. Excluding
+    # it to depth 0 would mean the rule is special-cased per construct rather
+    # than contextual; keeping it at 2 is the original bug.
+    graph = graph_of(tmp_path, app=COMPREHENSION_IN_FOR)
+    loops = _loop_by_callee(graph)
+
+    assert loops["expand"] == LoopContext(depth=1, kinds=("for",))
+    assert loops["use"] == LoopContext(depth=2, kinds=("for", "comprehension"))
+    assert loops["emit"] == LoopContext(depth=1, kinds=("for",))
